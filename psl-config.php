@@ -5,7 +5,7 @@
 define('HOST', 'localhost');     // Usually 'localhost' for local development
 define('USER', 'root');          // Default username for XAMPP
 define('PASSWORD', '');          // Default password for XAMPP is empty
-define('DATABASE', 'bestperforma_admin');
+define('DATABASE', 'bestperforma_admin_new');
  
 define("CAN_REGISTER", "any");
 define("DEFAULT_ROLE", "member");

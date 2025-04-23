@@ -1,97 +1,137 @@
 <?php
+require 'vendor/autoload.php';
 include_once 'db_connect.php';
 include_once 'functions.php';
 
+sec_session_start();
+
+$error = '';
 $message = '';
-$message_type = '';
+$token_valid = false;
 
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    $token = test_input($_POST['token']);
-    $new_password = test_input($_POST['new_password']);
-    $confirm_password = test_input($_POST['confirm_password']);
+// Verify token
+if (isset($_GET['token'])) {
+    $token = $_GET['token'];
+    
+    // Check if token exists and is not expired
+    $stmt = $mysqli->prepare("SELECT Email FROM regop WHERE reset_token = ? AND reset_expires > NOW()");
+    $stmt->bind_param('s', $token);
+    $stmt->execute();
+    $result = $stmt->get_result();
 
-    if ($new_password === $confirm_password) {
-        $sql = "SELECT reset_expiry FROM regop WHERE reset_token = ?";
-        $stmt = $mysqli->prepare($sql);
-        $stmt->bind_param('s', $token);
-        $stmt->execute();
-        $stmt->bind_result($reset_expiry);
-        $stmt->fetch();
-        $stmt->close();
-
-        if (strtotime($reset_expiry) > time()) {
-            $hash_cost_factor = '10';
-            $salt = sprintf('$2a$%02d$', $hash_cost_factor) . strtr(base64_encode(random_bytes(16)), '+', '.'); 
-            $hash = crypt($new_password, $salt);
-
-            $sql = "UPDATE regop SET Password = ?, reset_token = NULL, reset_expiry = NULL WHERE reset_token = ?";
-            $stmt = $mysqli->prepare($sql);
-            $stmt->bind_param('ss', $hash, $token);
-            $stmt->execute();
-            $stmt->close();
-
-            $message = 'Password has been reset successfully. Redirecting to login page...';
-            $message_type = 'success';
-            echo "<script>
-                    setTimeout(function() {
-                        window.location.href = 'login.php';
-                    }, 3000);
-                  </script>";
-        } else {
-            $message = 'Reset token has expired';
-            $message_type = 'danger';
-        }
+    if ($result->num_rows === 1) {
+        $token_valid = true;
     } else {
-        $message = 'Passwords do not match';
-        $message_type = 'danger';
+        $error = "Invalid or expired reset token. Please request a new password reset.";
+        //$error = $result;
+    }
+    $stmt->close();
+}
+
+// Handle password reset form submission
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['password']) && isset($_POST['token'])) {
+    $new_password = $_POST['password'];
+    $token = $_POST['token'];
+    
+    if (strlen($new_password) < 8) {
+        $error = "Password must be at least 8 characters long.";
+    } else {
+        // Hash the new password
+        $password_hash = password_hash($new_password, PASSWORD_DEFAULT);
+        
+        // Update password and clear reset token
+        $stmt = $mysqli->prepare("UPDATE regop SET Password = ?, reset_token = NULL, reset_expires = NULL WHERE reset_token = ? AND reset_expires > NOW()");
+        $stmt->bind_param('ss', $password_hash, $token);
+        $stmt->execute();
+        
+        if ($stmt->affected_rows === 1) {
+            $message = "Password successfully reset. You can now login with your new password.";
+            // Redirect to login page after 3 seconds
+            echo "<script>
+                setTimeout(function() {
+                    window.location.href = 'login.php';
+                }, 3000);
+            </script>";
+        } else {
+            $error = "Failed to reset password. Please try again.";
+        }
+        $stmt->close();
     }
 }
 ?>
 
-<!DOCTYPE HTML>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>Reset Password</title>
-    <meta charset="utf-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="stylesheet" href="css/bootstrap.min.css">
-    <link rel="stylesheet" href="css/bootstrap-table.css">
-    <script src="js/jquery-2.1.1.min.js"></script>
-    <script src="js/bootstrap.min.js"></script>
-    <script src="js/bootstrap-table.js"></script>
+    <meta charset="UTF-8">
+    <title>Reset Password - Department Details</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.2/css/bootstrap.min.css">
+    <style>
+        body { padding-top: 70px; background-color: #f8f9fb; }
+        .reset-container {
+            max-width: 400px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #fff;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+    </style>
 </head>
 <body>
-    <div class="container-fluid" style="margin-top:40px">
-        <div class="row">
-            <div class="col-sm-6 col-md-4 col-md-offset-4">
-                <div class="panel panel-default">
-                    <div class="panel-heading text-center text-capitalize">
-                        <strong>Reset Password</strong>
+    <div class="container">
+        <div class="reset-container">
+            <h2 class="text-center">Reset Password</h2>
+            
+            <?php if ($error): ?>
+                <div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div>
+            <?php endif; ?>
+            
+            <?php if ($message): ?>
+                <div class="alert alert-success"><?php echo htmlspecialchars($message); ?></div>
+            <?php endif; ?>
+            
+            <?php if ($token_valid): ?>
+                <form method="POST" action="">
+                    <input type="hidden" name="token" value="<?php echo htmlspecialchars($_GET['token']); ?>">
+                    <div class="form-group">
+                        <label for="password">New Password</label>
+                        <input type="password" class="form-control" id="password" name="password" required 
+                               minlength="8" pattern="(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).{8,}" 
+                               title="Must contain at least one number and one uppercase and lowercase letter, and at least 8 or more characters">
                     </div>
-                    <div class="panel-body">
-                        <?php if ($message): ?>
-                            <div class="alert alert-<?php echo $message_type; ?>" role="alert">
-                                <?php echo $message; ?>
-                            </div>
-                        <?php endif; ?>
-                        <form role="form" method="POST">
-                            <fieldset>
-                                <input type="hidden" name="token" value="<?php echo htmlspecialchars($_GET['token']); ?>">
-                                <div class="form-group">
-                                    <input class="form-control" placeholder="New Password" name="new_password" type="password" required>
-                                </div>
-                                <div class="form-group">
-                                    <input class="form-control" placeholder="Confirm Password" name="confirm_password" type="password" required>
-                                </div>
-                                <div class="form-group">
-                                    <input type="submit" class="btn btn-lg btn-primary btn-block" value="Reset Password">
-                                </div>
-                            </fieldset>
-                        </form>
+                    <div class="form-group">
+                        <label for="confirm_password">Confirm Password</label>
+                        <input type="password" class="form-control" id="confirm_password" required>
                     </div>
-                </div>
-            </div>
+                    <button type="submit" class="btn btn-primary btn-block">Reset Password</button>
+                </form>
+                
+                <script>
+                    // Password confirmation validation
+                    var password = document.getElementById("password");
+                    var confirm_password = document.getElementById("confirm_password");
+
+                    function validatePassword(){
+                        if(password.value != confirm_password.value) {
+                            confirm_password.setCustomValidity("Passwords Don't Match");
+                        } else {
+                            confirm_password.setCustomValidity('');
+                        }
+                    }
+
+                    password.onchange = validatePassword;
+                    confirm_password.onkeyup = validatePassword;
+                </script>
+            <?php else: ?>
+                <p class="text-center">
+                    <a href="forgot_password.php" class="btn btn-link">Request New Password Reset</a>
+                </p>
+            <?php endif; ?>
+            
+            <p class="text-center">
+                <a href="login.php">Back to Login</a>
+            </p>
         </div>
     </div>
 </body>
